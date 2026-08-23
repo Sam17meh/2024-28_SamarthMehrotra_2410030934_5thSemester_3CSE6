@@ -12,7 +12,7 @@ This repository contains the internship submission documents for the Cisco–AIC
 
 ## Contents
 
-| File | Description |
+| File | Descriptions |
 |---|---|
 | `Cisco_Internship_Report_Samarth_Mehrotra.pdf` | Final internship report, prepared per the IILM prescribed format, covering the NetSage AI problem statement, objectives, architecture, methodology, and expected outcomes. |
 | `Cisco_Internship_Presentation_Samarth_Mehrotra.pdf` | Internship presentation slides summarizing the project. |
