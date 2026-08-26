@@ -1,0 +1,13 @@
+# NetSage AI -- runtime requirements
+#
+# The deterministic rule checker, the schema validator and the review gate use the
+# standard library only. These three are for the dashboard and the optional live
+# provider. Versions are the ones this project was developed and verified against.
+
+pandas>=2.2
+matplotlib>=3.8
+Jinja2>=3.1
+requests>=2.32        # only used by the --provider anthropic path
+
+# Testing
+pytest>=8.0
