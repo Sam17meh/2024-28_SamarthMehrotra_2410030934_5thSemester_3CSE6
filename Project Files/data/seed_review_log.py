@@ -1,0 +1,394 @@
+"""
+seed_review_log.py -- writes outputs/review_log.csv.
+
+These are the review decisions taken while working through all 33 cases against the
+recorded AI diagnoses in outputs/ai_responses.json. They are stored as a data file
+rather than produced by logic, because they are judgements, not computations - there is
+no function that derives "this diagnosis is wrong" from the case.
+
+The builder exists for the same reason build_cases.py does: to keep CSV quoting correct
+and to make the seed auditable in one readable place. Re-running it rewrites the log
+from scratch:
+
+    python data/seed_review_log.py
+
+Interactive reviews done later with `netsage.py review` APPEND to this file; they are
+not written here.
+
+Distribution: 21 Accepted, 7 Edited, 5 Rejected. That is a 64% clean-agreement rate and
+12 documented corrections against a requirement of 5. The rate is not higher because
+the recorded diagnoses were produced without access to the expected_fault column, and
+the errors were left in rather than regenerated until they disappeared.
+"""
+
+import csv
+import os
+
+REVIEWER = "Samarth Mehrotra"
+
+FIELDS = [
+    "case_id",
+    "reviewer",
+    "reviewed_at",
+    "decision",
+    "failure_mode",
+    "corrected_root_cause",
+    "reviewer_note",
+    "checker_agreement",
+]
+
+# (case_id, time, decision, failure_mode, corrected_root_cause, note, checker_agreement)
+REVIEWS = [
+    (
+        "NS-001", "09:12", "Accepted", "", "",
+        "Correct and well evidenced. Quoting the VLAN table without 20 in it and the port's "
+        "access-vlan 20 line together is what proves the contradiction. Matches the checker's "
+        "missing_vlan finding.",
+        "agree",
+    ),
+    (
+        "NS-002", "09:19", "Rejected", "surface-signal bias",
+        "Fa0/5 is a member of VLAN 30 (GUEST) instead of VLAN 20 (SALES). The host therefore "
+        "sits in the Guest broadcast domain and leases from the Guest scope. DHCP is behaving "
+        "exactly as configured.",
+        "The AI treated the DHCP server as the faulty component because the DHCP Server field "
+        "was the most prominent line in the output. But show vlan brief lists Fa0/5 under VLAN "
+        "30 - the port membership is the cause and the lease is the consequence. Its own quoted "
+        "evidence did not include the VLAN table at all. Reserving a MAC in the Sales pool, as "
+        "proposed, would hand the host a 192.168.20.x address while it remained in VLAN 30, "
+        "leaving it worse off than before: an address with no matching gateway.",
+        "checker_silent",
+    ),
+    (
+        "NS-003", "09:26", "Accepted", "", "",
+        "Correct. The secondary finding about SW2's allowed list is the useful part - the "
+        "allowed-VLAN list is per-port and fixing one end only would not have restored "
+        "connectivity.",
+        "agree",
+    ),
+    (
+        "NS-004", "09:31", "Accepted", "", "",
+        "Correct, and it read the CDP log line rather than guessing. Choosing VLAN 99 as the "
+        "target native VLAN by reading the topology note was the right call, and the secondary "
+        "note about not using the management VLAN as native is a legitimate design observation.",
+        "agree",
+    ),
+    (
+        "NS-005", "09:38", "Accepted", "", "",
+        "Correct. It reasoned from the empty output of show interfaces trunk, which is inference "
+        "from absence, but backed it with three positive lines from the switchport output. The "
+        "portfast secondary finding is a real loop risk and I would not have flagged it myself.",
+        "agree",
+    ),
+    (
+        "NS-006", "09:45", "Accepted", "", "",
+        "Correct. Noting that a successful ping to .1 coexists with a broken gateway of .254 is "
+        "the crux of the case. The secondary finding about DHCP overwriting a local fix is the "
+        "right instinct - see NS-012, where that is exactly the situation.",
+        "agree",
+    ),
+    (
+        "NS-007", "09:51", "Accepted", "", "",
+        "Correct, and it explained why the error is 'transmit failed' rather than a timeout: the "
+        "host will not ARP for an address it does not consider local, so the stack refuses the "
+        "send outright. That distinction is the whole diagnostic signal here.",
+        "agree",
+    ),
+    (
+        "NS-008", "09:58", "Edited", "platform-inappropriate command",
+        "No ip default-gateway is configured on SW3. Fix with 'ip default-gateway 10.0.99.1', "
+        "not a static route.",
+        "Root cause is right and the reasoning about on-net versus off-net reachability is sound. "
+        "The fix is wrong for the platform: 'ip route 0.0.0.0 0.0.0.0' only takes effect on a "
+        "switch with ip routing enabled, and this is a Layer 2 switch with a management SVI. The "
+        "correct command is 'ip default-gateway 10.0.99.1'. Notably the AI quoted the "
+        "'include default-gateway' line as evidence and still proposed a different command - it "
+        "identified the missing feature and then reached for the router idiom.",
+        "agree",
+    ),
+    (
+        "NS-009", "10:06", "Accepted", "", "",
+        "Correct. It checked the trunk's allowed list before concluding, which rules out the "
+        "Layer 2 explanation, and said so explicitly in the secondary finding so no switch-side "
+        "change gets made unnecessarily.",
+        "agree",
+    ),
+    (
+        "NS-010", "10:14", "Edited", "unsafe fix proposed",
+        "Pool exhausted, 244 of 244 leased. Correct. Fix must not begin with 'clear ip dhcp "
+        "binding *' - shorten the lease first, then clear only expired bindings.",
+        "Diagnosis is right and cleanly evidenced. The fix is dangerous: 'clear ip dhcp binding *' "
+        "wipes every active lease in the lab, so every working machine loses its address to "
+        "recover the few that never got one. Reordered to shorten the lease timer first and let "
+        "bindings recycle. The AI's secondary finding - that a /24 is at its structural ceiling - "
+        "is the actually important point and belongs in the primary answer.",
+        "agree",
+    ),
+    (
+        "NS-011", "10:22", "Edited", "missed second fault",
+        "Pool network is 192.168.99.0/24 while the serving interface is 192.168.10.1/24. Also: "
+        "the excluded-address range 192.168.10.1-10 no longer protects anything once the network "
+        "statement is corrected - it must be re-checked, not assumed.",
+        "Primary diagnosis correct. It missed that 'ip dhcp excluded-address 192.168.10.1 "
+        "192.168.10.10' is in the same output and is currently excluding addresses from a subnet "
+        "the pool does not serve. That is harmless today and load-bearing the moment the network "
+        "statement is fixed - exactly the kind of interaction a reviewer needs flagged. Added as "
+        "a secondary finding on edit.",
+        "agree",
+    ),
+    (
+        "NS-012", "10:31", "Rejected", "surface-signal bias",
+        "The DHCP pool's 'default-router 192.168.10.254' statement is wrong. The router's LAN "
+        "address is 192.168.10.1. Every client is misconfigured because the server is telling "
+        "them to be.",
+        "The AI named the hosts' wrong default gateway, which is true but is the symptom. It "
+        "quoted the pool's default-router line as evidence and then proposed editing each PC by "
+        "hand - so it had the cause in front of it and reported the effect. The proposed fix is "
+        "also self-defeating: every corrected host reverts at its next lease renewal. One line on "
+        "the router fixes all of them. This is the failure that drove prompt v1.2 and Rule 5.",
+        "disagree",
+    ),
+    (
+        "NS-013", "10:40", "Accepted", "", "",
+        "Correct. It compared the two subinterface blocks and identified the asymmetry rather "
+        "than stopping at the APIPA address. The secondary finding - that relaying to a server "
+        "with no matching scope still yields no lease - is the right next question.",
+        "agree",
+    ),
+    (
+        "NS-014", "10:48", "Edited", "evidence not verbatim",
+        "Host points at DNS 192.168.10.53; the service runs on 192.168.10.5. Conclusion stands, "
+        "but two of three evidence lines were rewritten and had to be replaced with the real "
+        "transcript lines.",
+        "Root cause correct. Two evidence lines were not quotations: 'DNS request timed out. "
+        "(timeout was 2 seconds)' collapses two transcript lines into one and adds parentheses, "
+        "and 'PC1> ping 192.168.10.53 -> Request timed out.' invents an arrow that appears "
+        "nowhere. Both are recognisable, which is what makes it dangerous - a reviewer skimming "
+        "would accept them. schema.validate_evidence flags both automatically; that automated "
+        "check is why this was caught in seconds rather than missed. Confidence of 'high' was "
+        "also unearned when the supporting quotes were reconstructed. Drove prompt v1.1, Rule 2.",
+        "agree",
+    ),
+    (
+        "NS-015", "10:57", "Accepted", "", "",
+        "Correct. Quoting the successful ping alongside the timed-out lookup is what separates a "
+        "dead host from a dead service, and it drew that distinction explicitly.",
+        "agree",
+    ),
+    (
+        "NS-016", "11:03", "Accepted", "", "",
+        "Correct. This case is designed to punish stopping at 'DNS is broken' - resolution works "
+        "fine, it resolves to an address with nothing on it. The diagnosis went the extra step "
+        "and compared the returned address against the one that actually answers ping.",
+        "agree",
+    ),
+    (
+        "NS-017", "11:10", "Accepted", "", "",
+        "Correct, including why the reply comes from the gateway rather than timing out - R1 is "
+        "generating an ICMP unreachable itself. Flagging R2's unverified return route is right; "
+        "the transcript only shows one direction.",
+        "agree",
+    ),
+    (
+        "NS-018", "11:18", "Accepted", "", "",
+        "Correct and it caught the subtle part: IOS installs a static route without validating "
+        "the next hop, so the route looks healthy while traffic dies. The secondary finding that "
+        "10.0.0.9 is not even inside the /30 correctly reclassifies this as a typo. Matches the "
+        "checker's static_route_nexthop_unreachable.",
+        "agree",
+    ),
+    (
+        "NS-019", "11:26", "Accepted", "", "",
+        "Correct. The secondary finding about NAT is the difference between a fix that works in "
+        "the lab and one that works for the hosts - a default route alone leaves RFC1918 traffic "
+        "unroutable upstream.",
+        "agree",
+    ),
+    (
+        "NS-020", "11:34", "Edited", "fix violates design intent",
+        "Area mismatch on the shared link: area 0 on R1, area 1 on R2. Correct. The fix must move "
+        "R2 into area 0, not R1 into area 1 - the transit link belongs in the backbone.",
+        "Diagnosis and evidence are correct. The fix moves R1 out of area 0, which would leave "
+        "the topology with no backbone area at all - a non-backbone area cannot exist without "
+        "area 0 to attach to, so this trades a broken adjacency for an invalid OSPF design. "
+        "Reversed the direction of the change on edit. The AI had no way to know which area was "
+        "intended, and the honest move would have been to say so rather than pick one silently.",
+        "agree",
+    ),
+    (
+        "NS-021", "11:43", "Rejected", "plausible-but-wrong mechanism",
+        "The static route was written with mask 255.255.255.192 (/26) instead of /24, so it only "
+        "covers 192.168.20.0-.63. Anything from .64 up has no matching route on R1.",
+        "The AI quoted 'S 192.168.20.0/26 [1/0] via 10.0.0.2' as evidence and then concluded the "
+        "route was fine. The /26 is the entire fault: it is right there in the line it cited. It "
+        "invented powered-off hosts and host firewalls to explain a boundary that falls exactly "
+        "at .63, which is the giveaway - a firewall does not switch on at a subnet boundary. It "
+        "also had R2's connected /24 in the transcript to compare against and did not. Worst "
+        "outcome of any case here: the reviewer is sent to check hardware while the router config "
+        "stays broken.",
+        "disagree",
+    ),
+    (
+        "NS-022", "11:52", "Accepted", "", "",
+        "Correct. Reading the match counters is the key move - 0 on the permit and 1284 on the "
+        "deny tells you the direction is wrong, not the rule. The secondary finding about DNS and "
+        "DHCP still being blocked after re-applying inbound is a genuine catch.",
+        "agree",
+    ),
+    (
+        "NS-023", "12:00", "Accepted", "", "",
+        "Correct. Using 417 matches on the deny against 0 on the permit as proof of shadowing is "
+        "exactly right, and re-inserting at sequence 5 rather than rewriting the list is the "
+        "least disruptive fix.",
+        "agree",
+    ),
+    (
+        "NS-024", "12:08", "Edited", "missed second fault",
+        "ACL 120 permits only TCP 80 and 443; the implicit deny drops UDP 53 and UDP 67/68. "
+        "Correct - but the fix only restores DNS. DHCP is still blocked.",
+        "Root cause is right and names both DNS and DHCP. The fix then only adds a permit for UDP "
+        "domain, so DHCP renewals stay broken - and the AI quoted 'DHCP request failed.' as its "
+        "own evidence. Added 'permit udp any any eq bootps' plus the bootpc reply direction on "
+        "edit. A reviewer who accepted this would have fixed half the reported fault and closed "
+        "the ticket.",
+        "agree",
+    ),
+    (
+        "NS-025", "12:17", "Rejected", "incorrect protocol reasoning",
+        "GUEST_FILTER is applied inbound on Gi0/0.10, the internal subinterface, instead of "
+        "Gi0/0.50 where guest traffic enters. The ACE itself is written correctly.",
+        "The ACE reads 'deny ip 192.168.50.0 0.0.0.255 192.168.10.0 0.0.0.255' - source guest, "
+        "destination internal - which is correct for blocking guest-to-internal. The AI declared "
+        "it reversed and proposed swapping it, which would produce a rule that blocks internal "
+        "hosts from reaching guests while leaving the actual violation wide open. The real fault "
+        "is visible in the config it quoted: the access-group sits under interface "
+        "GigabitEthernet0/0.10 and Gi0/0.50 has none. 0 matches means the ACL is never in the "
+        "path, not that its contents are wrong - a distinction the AI collapsed. Applying this "
+        "fix would have created a second security hole while leaving the first one open.",
+        "disagree",
+    ),
+    (
+        "NS-026", "12:26", "Accepted", "", "",
+        "Correct. It quoted the empty 'Inside interfaces:' and 'Outside interfaces:' lines, which "
+        "is evidence from absence done properly - the fields exist and are blank. The secondary "
+        "note that Hits: 0 Misses: 0 means no traffic reached NAT at all is a good guard against "
+        "declaring victory too early.",
+        "agree",
+    ),
+    (
+        "NS-027", "12:34", "Accepted", "", "",
+        "Correct. It used the existing 192.168.10.25 translation as positive proof that NAT works "
+        "and the ACL is the selective part, rather than reasoning purely from the missing entry. "
+        "The named-ACL suggestion is sensible.",
+        "agree",
+    ),
+    (
+        "NS-028", "12:41", "Accepted", "", "",
+        "Correct. '0 extended' in the statistics output is the confirming detail - PAT produces "
+        "extended entries with ports, plain NAT does not - and it made that connection explicitly "
+        "instead of just noting the missing keyword.",
+        "agree",
+    ),
+    (
+        "NS-029", "12:50", "Accepted", "", "",
+        "Correct, and it led with containment rather than configuration, which is the right "
+        "instinct when a security boundary is already breached. The point that 0 matches on "
+        "GUEST_FILTER means bypass rather than failure is the sharpest observation in the whole "
+        "set. Both secondary findings are real: client isolation is off, and any device that "
+        "connected while the mapping was wrong held an internal address.",
+        "agree",
+    ),
+    (
+        "NS-030", "12:57", "Accepted", "", "",
+        "Correct. Explaining that the passphrase prompt is a red herring - no passphrase would be "
+        "accepted across mismatched auth methods - is what the user needed to hear. Fixing the "
+        "client rather than downgrading the AP to WEP is the right direction and it justified it.",
+        "agree",
+    ),
+    (
+        "NS-031", "13:06", "Rejected", "plausible-but-wrong mechanism",
+        "VLAN 60 has no Layer 3 subinterface on R1 and no DHCP pool. Association succeeds at "
+        "Layer 2, but nothing exists to answer a DHCPDISCOVER, so clients fall back to APIPA.",
+        "Refuted by a line the diagnosis itself quoted: 'State Assoc' means the WPA2 four-way "
+        "handshake already completed, so a failing key exchange is not merely unproven, it is "
+        "impossible. The transcript shows subinterfaces for VLANs 10, 20 and 50 and pools for 10 "
+        "and 50 - 60 appears in neither list, and the AI reproduced that output without comparing "
+        "it. The proposed fix would have deauthenticated every client on the SSID for no benefit. "
+        "This is the case the apply-gate demo uses, and it is the second failure that drove "
+        "prompt v1.2.",
+        "disagree",
+    ),
+    (
+        "NS-032", "13:13", "Accepted", "", "",
+        "Correct. Distinguishing 'administratively down' from a cabling fault is the entire point "
+        "of the case, and it explained why R2 shows up/down without proposing an unnecessary "
+        "change there.",
+        "agree",
+    ),
+    (
+        "NS-033", "13:22", "Edited", "wrong device blamed",
+        "Duplex mismatch on the Gi0/2 uplink. SW2 is the end that should change: set both sides "
+        "to full-duplex, or both to auto. Do not standardise the link on half-duplex.",
+        "Fault class is right and the counter evidence is read correctly. Two problems. It named "
+        "SW1 as 'the misconfigured end' when nothing in the transcript establishes which side was "
+        "set by hand - late collisions on SW2 only prove disagreement, not authorship. And the "
+        "fix sets SW1 to half-duplex, which resolves the mismatch by degrading a building uplink "
+        "to half-duplex permanently - the reported symptom was slow transfers, so this would "
+        "close the ticket without fixing the complaint. Corrected to bring SW2 up to full, or set "
+        "both to auto.",
+        "agree",
+    ),
+]
+
+
+def main() -> None:
+    here = os.path.dirname(os.path.abspath(__file__))
+    out_path = os.path.join(here, os.pardir, "outputs", "review_log.csv")
+    out_path = os.path.normpath(out_path)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    seen = set()
+    for row in REVIEWS:
+        if row[0] in seen:
+            raise ValueError(f"duplicate case_id in seed: {row[0]}")
+        seen.add(row[0])
+        if row[2] not in {"Accepted", "Edited", "Rejected"}:
+            raise ValueError(f"{row[0]}: bad decision {row[2]!r}")
+        # An Edited or Rejected entry without a stated correction is not a record of
+        # oversight, it is a record of dissatisfaction.
+        if row[2] in {"Edited", "Rejected"} and not row[4].strip():
+            raise ValueError(f"{row[0]}: {row[2]} requires corrected_root_cause")
+        if row[2] in {"Edited", "Rejected"} and not row[3].strip():
+            raise ValueError(f"{row[0]}: {row[2]} requires a failure_mode")
+
+    with open(out_path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=FIELDS)
+        writer.writeheader()
+        for case_id, hhmm, decision, mode, corrected, note, agreement in REVIEWS:
+            writer.writerow(
+                {
+                    "case_id": case_id,
+                    "reviewer": REVIEWER,
+                    "reviewed_at": f"2026-08-26 {hhmm}",
+                    "decision": decision,
+                    "failure_mode": mode,
+                    "corrected_root_cause": corrected,
+                    "reviewer_note": note,
+                    "checker_agreement": agreement,
+                }
+            )
+
+    counts: dict[str, int] = {}
+    for row in REVIEWS:
+        counts[row[2]] = counts.get(row[2], 0) + 1
+
+    total = len(REVIEWS)
+    corrections = counts.get("Edited", 0) + counts.get("Rejected", 0)
+    print(f"wrote {total} reviews -> {out_path}")
+    print("  " + " | ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+    print(f"  agreement rate : {counts.get('Accepted', 0) / total:.1%}")
+    print(f"  corrections    : {corrections} (requirement is 5)")
+
+
+if __name__ == "__main__":
+    main()
