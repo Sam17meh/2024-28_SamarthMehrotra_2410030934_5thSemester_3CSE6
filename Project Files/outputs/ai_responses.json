@@ -1,0 +1,732 @@
+{
+  "NS-001": {
+    "root_cause": "VLAN 20 does not exist in the switch VLAN database, but Fa0/3 is configured as an access port in VLAN 20. The port is up and the link is good, yet frames are dropped because they are assigned to an inactive VLAN.",
+    "osi_layer": 2,
+    "concept_tag": "VLAN",
+    "confidence": "high",
+    "evidence": [
+      "1    default                          active    Fa0/1, Fa0/2, Fa0/4, Fa0/5",
+      "10   SALES                            active    Fa0/6, Fa0/7",
+      " switchport access vlan 20"
+    ],
+    "next_command": "show interfaces Fa0/3 switchport",
+    "fix_steps": [
+      "On SW1: configure terminal",
+      "Create the missing VLAN: vlan 20",
+      "Name it for clarity: name SALES-VLAN20",
+      "Exit config and confirm with: show vlan brief",
+      "Re-test the ping from PC1 to 192.168.20.1"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-002": {
+    "root_cause": "PC5 is leasing from the wrong DHCP scope. The DHCP server at 192.168.30.1 is answering the request and handing out a Guest-subnet address, so the DHCP scope selection is misconfigured for this client.",
+    "osi_layer": 3,
+    "concept_tag": "DHCP",
+    "confidence": "medium",
+    "evidence": [
+      "   IP Address. . . . . . . . . . . . : 192.168.30.24",
+      "   DHCP Server . . . . . . . . . . . : 192.168.30.1"
+    ],
+    "next_command": "show ip dhcp binding",
+    "fix_steps": [
+      "On the router: configure terminal",
+      "Inspect the pool serving VLAN 30: show running-config | section dhcp",
+      "Reserve PC5's MAC in the Sales pool so it leases from 192.168.20.0/24",
+      "Release and renew on PC5: ipconfig /release then ipconfig /renew"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-003": {
+    "root_cause": "VLAN 40 is not in the allowed VLAN list on the Gi0/1 trunk. The trunk carries 1,10,20,30 only, so VLAN 40 frames are pruned at the inter-switch link even though the VLAN exists and is active on both switches.",
+    "osi_layer": 2,
+    "concept_tag": "VLAN",
+    "confidence": "high",
+    "evidence": [
+      "Gi0/1       1,10,20,30",
+      "40   ENGINEERING                      active    Fa0/8, Fa0/9"
+    ],
+    "next_command": "show interfaces trunk",
+    "fix_steps": [
+      "On SW1: configure terminal",
+      "Select the trunk: interface GigabitEthernet0/1",
+      "Add VLAN 40 to the allowed list: switchport trunk allowed vlan add 40",
+      "Repeat on SW2 Gi0/1 - the allowed list is per-port and must match on both ends",
+      "Verify with: show interfaces trunk"
+    ],
+    "secondary_findings": [
+      "SW2's trunk allowed-VLAN list was not supplied. If VLAN 40 is pruned there as well, fixing only SW1 will not restore connectivity."
+    ],
+    "requires_human_review": true
+  },
+  "NS-004": {
+    "root_cause": "Native VLAN mismatch on the Fa0/24 trunk: SW1 uses native VLAN 1 while SW2 uses native VLAN 99. Untagged frames are placed into different VLANs at each end, which leaks traffic between VLAN 1 and VLAN 99 and makes spanning-tree behaviour inconsistent.",
+    "osi_layer": 2,
+    "concept_tag": "VLAN",
+    "confidence": "high",
+    "evidence": [
+      "Fa0/24      on           802.1q         trunking      1",
+      "Fa0/24      on           802.1q         trunking      99",
+      "%CDP-4-NATIVE_VLAN_MISMATCH: Native VLAN mismatch discovered on FastEthernet0/24 (1),"
+    ],
+    "next_command": "show interfaces FastEthernet0/24 trunk",
+    "fix_steps": [
+      "Decide which native VLAN is intended - the topology note names VLAN 99 as management, so align SW1 to 99",
+      "On SW1: configure terminal",
+      "interface FastEthernet0/24",
+      "switchport trunk native vlan 99",
+      "Confirm the CDP warning stops and verify with: show interfaces trunk"
+    ],
+    "secondary_findings": [
+      "Using the management VLAN as the native VLAN is workable but not best practice. A dedicated unused native VLAN would reduce the exposure of untagged traffic."
+    ],
+    "requires_human_review": true
+  },
+  "NS-005": {
+    "root_cause": "The inter-switch link on Gi0/1 was left in static access mode in VLAN 1 rather than configured as an 802.1q trunk. show interfaces trunk returns nothing at all, which means no trunk exists on this switch, so only VLAN 1 traffic crosses the link.",
+    "osi_layer": 2,
+    "concept_tag": "VLAN",
+    "confidence": "high",
+    "evidence": [
+      " switchport mode access",
+      "Administrative Mode: static access",
+      "Access Mode VLAN: 1 (default)"
+    ],
+    "next_command": "show interfaces GigabitEthernet0/1 trunk",
+    "fix_steps": [
+      "On SW1: configure terminal",
+      "interface GigabitEthernet0/1",
+      "switchport trunk encapsulation dot1q",
+      "switchport mode trunk",
+      "Remove portfast from the trunk - it is intended for access ports: no spanning-tree portfast",
+      "Apply the same trunk configuration to SW2 Gi0/1, then verify: show interfaces trunk"
+    ],
+    "secondary_findings": [
+      "spanning-tree portfast is configured on what should be a switch-to-switch link. On a trunk this bypasses the listening and learning states and can create a temporary forwarding loop."
+    ],
+    "requires_human_review": true
+  },
+  "NS-006": {
+    "root_cause": "PC2's default gateway is set to 192.168.10.254, but no device holds that address. R1's LAN interface is 192.168.10.1, which is why PC2 can ping the router directly yet has no working gateway for off-subnet traffic.",
+    "osi_layer": 3,
+    "concept_tag": "Gateway",
+    "confidence": "high",
+    "evidence": [
+      "   Default Gateway . . . . . . . . . : 192.168.10.254",
+      "GigabitEthernet0/0     192.168.10.1    YES manual up                    up",
+      "Reply from 192.168.10.1: bytes=32 time<1ms TTL=255"
+    ],
+    "next_command": "arp -a",
+    "fix_steps": [
+      "On PC2, open the IP configuration",
+      "Change the default gateway from 192.168.10.254 to 192.168.10.1",
+      "Clear the stale ARP entry: arp -d 192.168.10.254",
+      "Re-test off-subnet reachability: ping 192.168.20.10"
+    ],
+    "secondary_findings": [
+      "If PC2 is a DHCP client, correcting it locally will be overwritten at the next renewal. Check the pool's default-router statement before closing this out."
+    ],
+    "requires_human_review": true
+  },
+  "NS-007": {
+    "root_cause": "The default gateway 192.168.11.1 lies outside PC3's own 192.168.10.0/24 subnet. The host cannot ARP for an address it does not consider local, so the stack fails the send outright rather than timing out.",
+    "osi_layer": 3,
+    "concept_tag": "Gateway",
+    "confidence": "high",
+    "evidence": [
+      "   IP Address. . . . . . . . . . . . : 192.168.10.50",
+      "   Default Gateway . . . . . . . . . : 192.168.11.1",
+      "PING: transmit failed. General failure.",
+      "GigabitEthernet0/0     192.168.10.1    YES manual up                    up"
+    ],
+    "next_command": "route print",
+    "fix_steps": [
+      "On PC3, open the IP configuration",
+      "Change the default gateway from 192.168.11.1 to 192.168.10.1",
+      "Confirm the subnet mask stays 255.255.255.0",
+      "Verify: ping 192.168.10.1 then ping a host in another subnet"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-008": {
+    "root_cause": "No ip default-gateway is configured on SW3. The include filter for default-gateway returns nothing, so the switch has no next hop for traffic it originates. It reaches 10.0.99.1 because that is on its own directly connected VLAN 99 subnet, and fails to 10.0.50.20 because that is off-net.",
+    "osi_layer": 3,
+    "concept_tag": "Gateway",
+    "confidence": "high",
+    "evidence": [
+      "SW3#show running-config | include default-gateway",
+      "Vlan99                 10.0.99.3       YES manual up                    up",
+      "Success rate is 0 percent (0/5)",
+      "Success rate is 100 percent (5/5)"
+    ],
+    "next_command": "show ip route",
+    "fix_steps": [
+      "On SW3: configure terminal",
+      "Add a default route toward the gateway: ip route 0.0.0.0 0.0.0.0 10.0.99.1",
+      "Verify with: show ip route",
+      "Re-test: ping 10.0.50.20"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-009": {
+    "root_cause": "The router-on-a-stick configuration has no Gi0/0.30 subinterface. Subinterfaces exist for VLAN 10 and VLAN 20 only, so VLAN 30 has no Layer 3 gateway despite the VLAN being permitted on the trunk.",
+    "osi_layer": 3,
+    "concept_tag": "Gateway",
+    "confidence": "high",
+    "evidence": [
+      "GigabitEthernet0/0.10      192.168.10.1    YES manual up                    up",
+      "GigabitEthernet0/0.20      192.168.20.1    YES manual up                    up",
+      "Gi0/1       1,10,20,30"
+    ],
+    "next_command": "show vlan brief",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "interface GigabitEthernet0/0.30",
+      "encapsulation dot1Q 30",
+      "ip address 192.168.30.1 255.255.255.0",
+      "Verify it comes up: show ip interface brief | include 0/0.30",
+      "Re-test from a VLAN 30 host: ping 192.168.30.1"
+    ],
+    "secondary_findings": [
+      "The trunk already permits VLAN 30, so the Layer 2 path is intact. Only the Layer 3 gateway is missing - no switch-side change should be needed."
+    ],
+    "requires_human_review": true
+  },
+  "NS-010": {
+    "root_cause": "The DHCP pool is fully exhausted. All 244 usable addresses are leased, so clients booting later get no DHCPOFFER and fall back to APIPA self-assignment in 169.254.0.0/16.",
+    "osi_layer": 3,
+    "concept_tag": "DHCP",
+    "confidence": "high",
+    "evidence": [
+      " Total addresses                : 244",
+      " Leased addresses               : 244",
+      "   IP Address. . . . . . . . . . . . : 169.254.88.17"
+    ],
+    "next_command": "show ip dhcp pool",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "Free the pool immediately: clear ip dhcp binding *",
+      "Shorten the lease so stale bindings recycle faster: ip dhcp pool LAB_POOL then lease 0 2",
+      "Verify utilisation drops: show ip dhcp pool"
+    ],
+    "secondary_findings": [
+      "A /24 with 244 usable addresses is at its structural ceiling. If the lab genuinely needs more concurrent hosts, the subnet itself must be enlarged rather than the pool retuned."
+    ],
+    "requires_human_review": true
+  },
+  "NS-011": {
+    "root_cause": "The DHCP pool's network statement is 192.168.99.0/24 while the serving interface Gi0/0 is 192.168.10.1/24. The router hands out addresses from a subnet that does not exist on the wire, so clients are unreachable in both directions.",
+    "osi_layer": 3,
+    "concept_tag": "DHCP",
+    "confidence": "high",
+    "evidence": [
+      " network 192.168.99.0 255.255.255.0",
+      "GigabitEthernet0/0     192.168.10.1    YES manual up                    up",
+      "   IP Address. . . . . . . . . . . . : 192.168.99.2"
+    ],
+    "next_command": "show ip dhcp binding",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "ip dhcp pool LAN_POOL",
+      "Correct the network statement: network 192.168.10.0 255.255.255.0",
+      "Clear the wrong-subnet leases: clear ip dhcp binding *",
+      "Renew on a client and confirm it lands in 192.168.10.0/24"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-012": {
+    "root_cause": "Every host has an incorrect default gateway of 192.168.10.254. Because the gateway address does not resolve to a router interface, off-subnet traffic is never forwarded, which is why intra-subnet pings succeed.",
+    "osi_layer": 3,
+    "concept_tag": "Gateway",
+    "confidence": "medium",
+    "evidence": [
+      "   Default Gateway . . . . . . . . . : 192.168.10.254",
+      "GigabitEthernet0/0     192.168.10.1    YES manual up                    up",
+      "Reply from 192.168.10.12: bytes=32 time<1ms TTL=128"
+    ],
+    "next_command": "arp -a",
+    "fix_steps": [
+      "On each affected PC, open the IP configuration",
+      "Change the default gateway to 192.168.10.1",
+      "Clear the stale ARP entry: arp -d 192.168.10.254",
+      "Re-test off-subnet reachability"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-013": {
+    "root_cause": "Gi0/0.20 has no ip helper-address, so DHCPDISCOVER broadcasts from VLAN 20 are never relayed to the server at 192.168.10.5. VLAN 10 works because its clients share a broadcast domain with the server and need no relay.",
+    "osi_layer": 3,
+    "concept_tag": "DHCP",
+    "confidence": "high",
+    "evidence": [
+      " ip helper-address 192.168.10.5",
+      "DHCPD: no DHCPDISCOVER received from GigabitEthernet0/0.20.",
+      "   IP Address. . . . . . . . . . . . : 169.254.12.9"
+    ],
+    "next_command": "show running-config interface GigabitEthernet0/0.20",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "interface GigabitEthernet0/0.20",
+      "ip helper-address 192.168.10.5",
+      "Verify: show running-config interface GigabitEthernet0/0.20",
+      "Renew on a VLAN 20 client and confirm it leases in 192.168.20.0/24"
+    ],
+    "secondary_findings": [
+      "Confirm the DHCP server actually has a scope defined for 192.168.20.0/24. Relaying the broadcast to a server with no matching scope will still produce no lease."
+    ],
+    "requires_human_review": true
+  },
+  "NS-014": {
+    "root_cause": "The host is configured with DNS server 192.168.10.53, but nothing answers at that address. The real DNS service runs on 192.168.10.5 per the topology note, so every lookup times out while IP connectivity is unaffected.",
+    "osi_layer": 7,
+    "concept_tag": "DNS",
+    "confidence": "high",
+    "evidence": [
+      "   DNS Servers . . . . . . . . . . . : 192.168.10.53",
+      "DNS request timed out. (timeout was 2 seconds)",
+      "PC1> ping 192.168.10.53 -> Request timed out."
+    ],
+    "next_command": "nslookup www.lab.local 192.168.10.5",
+    "fix_steps": [
+      "On PC1, open the IP configuration",
+      "Change the DNS server from 192.168.10.53 to 192.168.10.5",
+      "Flush the resolver cache: ipconfig /flushdns",
+      "Verify: nslookup www.lab.local"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-015": {
+    "root_cause": "The DNS service is administratively disabled on the server. The host is reachable and the resource records are intact, so the daemon simply is not listening - which explains a lab-wide resolution failure with no impact on IP connectivity.",
+    "osi_layer": 7,
+    "concept_tag": "DNS",
+    "confidence": "high",
+    "evidence": [
+      "   DNS Service : Off",
+      "*** Request to 192.168.10.5 timed-out",
+      "Reply from 192.168.10.5: bytes=32 time<1ms TTL=128"
+    ],
+    "next_command": "nslookup www.lab.local 192.168.10.5",
+    "fix_steps": [
+      "Open the DNS server's Services > DNS panel",
+      "Set DNS Service to On",
+      "Confirm both A records are still present after the service starts",
+      "From PC1: ipconfig /flushdns then nslookup www.lab.local"
+    ],
+    "secondary_findings": [
+      "A single DNS server is a single point of failure for the whole lab. A secondary resolver would keep name resolution working through this class of outage."
+    ],
+    "requires_human_review": true
+  },
+  "NS-016": {
+    "root_cause": "The A record for www.lab.local points to 192.168.20.99, which is not assigned to any host. Resolution succeeds and returns that address, then the connection attempt goes nowhere. The actual web server is 192.168.20.10.",
+    "osi_layer": 7,
+    "concept_tag": "DNS",
+    "confidence": "high",
+    "evidence": [
+      "Address: 192.168.20.99",
+      "     www.lab.local     A     192.168.20.99",
+      "Reply from 192.168.20.10: bytes=32 time=1ms TTL=127"
+    ],
+    "next_command": "nslookup www.lab.local",
+    "fix_steps": [
+      "Open the DNS server's Services > DNS panel",
+      "Edit the www.lab.local A record to 192.168.20.10",
+      "Save the record and confirm DNS Service is still On",
+      "On PC1: ipconfig /flushdns then nslookup www.lab.local",
+      "Browse to http://www.lab.local to confirm end to end"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-017": {
+    "root_cause": "R1 has no route to 192.168.30.0/24 and no default route. Its table holds only the two directly connected networks, so it drops the traffic itself and returns an ICMP unreachable - which is why the reply comes from the gateway address rather than timing out.",
+    "osi_layer": 3,
+    "concept_tag": "Routing",
+    "confidence": "high",
+    "evidence": [
+      "C    192.168.10.0/24 is directly connected, GigabitEthernet0/0",
+      "Reply from 192.168.10.1: Destination host unreachable.",
+      "Success rate is 100 percent (5/5)"
+    ],
+    "next_command": "show ip route 192.168.30.0",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "ip route 192.168.30.0 255.255.255.0 10.0.0.2",
+      "Verify it installed: show ip route static",
+      "Confirm R2 has a return route to 192.168.10.0/24 before declaring this fixed",
+      "Re-test end to end from PC1"
+    ],
+    "secondary_findings": [
+      "R2's routing table was not supplied. A missing return route on R2 would produce the same user-visible symptom and should be checked in the same pass."
+    ],
+    "requires_human_review": true
+  },
+  "NS-018": {
+    "root_cause": "The static route to 10.10.30.0/24 points at next hop 10.0.0.9, which does not exist. On a /30 link the only valid peer address is 10.0.0.2, and CDP confirms that is the actual neighbour. IOS installs a static route without validating the next hop, which is why the route appears healthy while traffic fails.",
+    "osi_layer": 3,
+    "concept_tag": "Routing",
+    "confidence": "high",
+    "evidence": [
+      "S       10.10.30.0/24 [1/0] via 10.0.0.9",
+      "  IP address: 10.0.0.2",
+      "Success rate is 0 percent (0/5)"
+    ],
+    "next_command": "show ip route 10.10.30.0",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "Remove the bad route: no ip route 10.10.30.0 255.255.255.0 10.0.0.9",
+      "Add the correct one: ip route 10.10.30.0 255.255.255.0 10.0.0.2",
+      "Verify: show ip route static",
+      "Re-test: ping 10.10.30.1 source GigabitEthernet0/1"
+    ],
+    "secondary_findings": [
+      "10.0.0.9 is not even inside the 10.0.0.0/30 subnet configured on Gi0/1, so this was a typo rather than a valid-but-wrong peer. Worth checking whether other static routes on this router share the same mistake."
+    ],
+    "requires_human_review": true
+  },
+  "NS-019": {
+    "root_cause": "R1 has no default route toward the ISP. The table contains the two LANs and the WAN transit network but no 0.0.0.0/0 entry, so packets for internet destinations have no matching route and R1 answers with an ICMP unreachable even though the ISP next hop is pingable.",
+    "osi_layer": 3,
+    "concept_tag": "Routing",
+    "confidence": "high",
+    "evidence": [
+      "C       203.0.113.0 is directly connected, GigabitEthernet0/1",
+      "Success rate is 100 percent (5/5)",
+      "Reply from 192.168.10.1: Destination host unreachable."
+    ],
+    "next_command": "show ip route 0.0.0.0",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "ip route 0.0.0.0 0.0.0.0 203.0.113.1",
+      "Verify the gateway of last resort is set: show ip route",
+      "Re-test from R1: ping 8.8.8.8",
+      "Then re-test from PC1 - if the router succeeds but the host does not, NAT is the next thing to check"
+    ],
+    "secondary_findings": [
+      "Internal hosts use RFC1918 addressing, so a default route alone will not give them internet access without NAT. Verify ip nat inside/outside and the translation rule in the same pass."
+    ],
+    "requires_human_review": true
+  },
+  "NS-020": {
+    "root_cause": "The shared 10.0.0.0/30 link is placed in OSPF area 0 on R1 and area 1 on R2. Area IDs must match on a common segment, so the hello packets are discarded and no adjacency forms - which is why the neighbour table is empty despite full IP reachability.",
+    "osi_layer": 3,
+    "concept_tag": "Routing",
+    "confidence": "high",
+    "evidence": [
+      " network 10.0.0.0 0.0.0.3 area 0",
+      " network 10.0.0.0 0.0.0.3 area 1",
+      "  Internet Address 10.0.0.1/30, Area 0"
+    ],
+    "next_command": "show ip ospf interface GigabitEthernet0/1",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "router ospf 1",
+      "Remove the area 0 statement: no network 10.0.0.0 0.0.0.3 area 0",
+      "Re-add it in area 1 to match R2: network 10.0.0.0 0.0.0.3 area 1",
+      "Verify the neighbour forms: show ip ospf neighbor"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-021": {
+    "root_cause": "The route to 192.168.20.0/24 is present and correct, and 192.168.20.50 responds normally over it. The hosts from .70 upward are most likely powered off or running a local firewall that drops ICMP echo requests, since the forwarding path itself is demonstrably working.",
+    "osi_layer": 3,
+    "concept_tag": "Routing",
+    "confidence": "medium",
+    "evidence": [
+      "S    192.168.20.0/26 [1/0] via 10.0.0.2",
+      "Success rate is 100 percent (5/5)",
+      "Success rate is 0 percent (0/5)"
+    ],
+    "next_command": "show ip arp 192.168.20.80",
+    "fix_steps": [
+      "Confirm 192.168.20.80 is powered on and connected",
+      "Check for a host firewall blocking ICMP on the affected machines",
+      "From R2, ping 192.168.20.80 locally to confirm it answers on its own segment",
+      "If R2 can reach it locally, investigate the return path from R2 toward 192.168.10.0/24"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-022": {
+    "root_cause": "ACL 101 is applied outbound on Gi0/0, the LAN-facing interface. In that direction it inspects traffic being delivered to the LAN rather than traffic sourced from it, so the permit for LAN-to-server never matches and the deny at sequence 20 drops all returning traffic.",
+    "osi_layer": 4,
+    "concept_tag": "ACL",
+    "confidence": "high",
+    "evidence": [
+      " ip access-group 101 out",
+      "    10 permit tcp 192.168.10.0 0.0.0.255 host 192.168.20.10 eq www (0 matches)",
+      "    20 deny ip any any (1284 matches)"
+    ],
+    "next_command": "show ip interface GigabitEthernet0/0",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "interface GigabitEthernet0/0",
+      "Remove the outbound application: no ip access-group 101 out",
+      "Apply it inbound instead: ip access-group 101 in",
+      "Watch the counters move onto sequence 10: show access-lists 101"
+    ],
+    "secondary_findings": [
+      "Once applied inbound, the deny at sequence 20 will still block DNS and DHCP for the LAN. If the intent is HTTP-only to the server, that is correct; if general internet access is expected, ACL 101 needs additional permits."
+    ],
+    "requires_human_review": true
+  },
+  "NS-023": {
+    "root_cause": "ACL entry ordering is wrong. The broad deny at sequence 10 covers the whole 192.168.10.0/24 source range to the server, so it matches 192.168.10.20 first and the specific permit at sequence 20 is never evaluated. The 417 matches on the deny and 0 on the permit confirm the shadowing.",
+    "osi_layer": 4,
+    "concept_tag": "ACL",
+    "confidence": "high",
+    "evidence": [
+      "    10 deny ip 192.168.10.0 0.0.0.255 host 192.168.20.10 (417 matches)",
+      "    20 permit tcp host 192.168.10.20 host 192.168.20.10 eq www (0 matches)"
+    ],
+    "next_command": "show access-lists 110",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "ip access-list extended 110",
+      "Remove the shadowed permit: no 20",
+      "Re-insert it ahead of the deny: 5 permit tcp host 192.168.10.20 host 192.168.20.10 eq www",
+      "Verify the order and watch sequence 5 take matches: show access-lists 110"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-024": {
+    "root_cause": "ACL 120 permits only TCP 80 and 443. Everything else falls through to the implicit deny ip any any at the end of the list, which silently drops UDP 53 for DNS and UDP 67/68 for DHCP. Web browsing survives because it is the only thing explicitly permitted.",
+    "osi_layer": 4,
+    "concept_tag": "ACL",
+    "confidence": "high",
+    "evidence": [
+      "    10 permit tcp any any eq www (2043 matches)",
+      "    20 permit tcp any any eq 443 (1877 matches)",
+      "DNS request timed out.",
+      "DHCP request failed."
+    ],
+    "next_command": "show access-lists 120",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "ip access-list extended 120",
+      "Permit name resolution: 30 permit udp any host 192.168.10.5 eq domain",
+      "Re-test: nslookup www.lab.local and ipconfig /renew",
+      "Verify the new entry is taking matches: show access-lists 120"
+    ],
+    "secondary_findings": [
+      "The implicit deny also blocks ICMP, so ping-based troubleshooting from these hosts will keep failing until an explicit permit is added."
+    ],
+    "requires_human_review": true
+  },
+  "NS-025": {
+    "root_cause": "The deny entry in GUEST_FILTER has its source and destination reversed. It reads deny ip 192.168.50.0 0.0.0.255 192.168.10.0 0.0.0.255, which on the interface where it is applied evaluates guest-destined rather than guest-sourced traffic, so guest-to-internal flows fall through to the permit at sequence 20.",
+    "osi_layer": 4,
+    "concept_tag": "ACL",
+    "confidence": "medium",
+    "evidence": [
+      "    10 deny ip 192.168.50.0 0.0.0.255 192.168.10.0 0.0.0.255 (0 matches)",
+      "    20 permit ip any any (0 matches)",
+      "Reply from 192.168.10.50: bytes=32 time=2ms TTL=127"
+    ],
+    "next_command": "show access-lists GUEST_FILTER",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "ip access-list extended GUEST_FILTER",
+      "Remove the reversed entry: no 10",
+      "Re-add with source and destination swapped: 10 deny ip 192.168.10.0 0.0.0.255 192.168.50.0 0.0.0.255",
+      "Re-test from the guest host and confirm the deny takes matches"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-026": {
+    "root_cause": "Neither interface carries an ip nat inside or ip nat outside designation. The translation rule and its source ACL both exist, but NAT never engages without interface roles, so internal traffic leaves with its RFC1918 source address and is discarded upstream. The empty interface lists in show ip nat statistics prove it.",
+    "osi_layer": 3,
+    "concept_tag": "NAT",
+    "confidence": "high",
+    "evidence": [
+      "ip nat inside source list 1 interface GigabitEthernet0/1 overload",
+      "Outside interfaces:",
+      "Inside interfaces:",
+      "Hits: 0  Misses: 0"
+    ],
+    "next_command": "show ip nat statistics",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "interface GigabitEthernet0/0 then ip nat inside",
+      "interface GigabitEthernet0/1 then ip nat outside",
+      "Verify both lists are now populated: show ip nat statistics",
+      "Generate traffic from a LAN host and confirm entries appear in: show ip nat translations"
+    ],
+    "secondary_findings": [
+      "Hits: 0 Misses: 0 means no traffic has even been offered to the NAT process. If the counters stay at zero after applying the roles, the problem is upstream of NAT - check for a default route first."
+    ],
+    "requires_human_review": true
+  },
+  "NS-027": {
+    "root_cause": "The NAT source ACL permits only 192.168.10.0/24. VLAN 20 traffic is marked ip nat inside on the subinterface but never matches access-list 1, so it leaves the router untranslated with a private source address and is dropped by the ISP.",
+    "osi_layer": 3,
+    "concept_tag": "NAT",
+    "confidence": "high",
+    "evidence": [
+      "access-list 1 permit 192.168.10.0 0.0.0.255",
+      " ip nat inside",
+      "tcp 203.0.113.2:1044   192.168.10.25:1044 8.8.8.8:53         8.8.8.8:53"
+    ],
+    "next_command": "show ip nat statistics",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "Add the missing source network: access-list 1 permit 192.168.20.0 0.0.0.255",
+      "Confirm both lines are present: show running-config | include access-list 1",
+      "Generate traffic from a VLAN 20 host",
+      "Confirm a 192.168.20.x entry appears in: show ip nat translations"
+    ],
+    "secondary_findings": [
+      "Standard ACL 1 is being reused as a NAT selector. Converting it to a named ACL would make the intent clearer and avoid a later collision if ACL 1 is also used for filtering."
+    ],
+    "requires_human_review": true
+  },
+  "NS-028": {
+    "root_cause": "The overload keyword is missing from the NAT statement, so the router performs one-to-one dynamic NAT instead of PAT. With 203.0.113.2 as the only public address, exactly one internal host can hold a translation at a time, and the next host displaces it.",
+    "osi_layer": 3,
+    "concept_tag": "NAT",
+    "confidence": "high",
+    "evidence": [
+      "ip nat inside source list 1 interface GigabitEthernet0/1",
+      "--- 203.0.113.2        192.168.10.25      ---                ---",
+      "Total active translations: 1 (0 static, 1 dynamic; 0 extended)"
+    ],
+    "next_command": "show ip nat statistics",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "Remove the non-overloaded rule: no ip nat inside source list 1 interface GigabitEthernet0/1",
+      "Re-add it with PAT: ip nat inside source list 1 interface GigabitEthernet0/1 overload",
+      "Clear existing translations: clear ip nat translation *",
+      "Browse from two hosts at once and confirm both appear in: show ip nat translations"
+    ],
+    "secondary_findings": [
+      "0 extended translations in the statistics output is the same signal seen from another angle - PAT produces extended entries with port numbers, plain NAT does not."
+    ],
+    "requires_human_review": true
+  },
+  "NS-029": {
+    "root_cause": "The LAB-GUEST SSID is mapped to VLAN 10, the internal VLAN, rather than guest VLAN 50. Guests are placed directly onto the internal subnet, so GUEST_FILTER on the 192.168.50.0/24 boundary is never in the traffic path at all - its 0 matches confirm it is being bypassed rather than failing.",
+    "osi_layer": 3,
+    "concept_tag": "Wireless",
+    "confidence": "high",
+    "evidence": [
+      "    Interface/VLAN mapping : VLAN 10",
+      "   IP Address. . . . . . . . . . . . : 192.168.10.87",
+      "    10 deny ip 192.168.50.0 0.0.0.255 192.168.10.0 0.0.0.255 (0 matches)",
+      "Reply from 192.168.10.50: bytes=32 time=3ms TTL=128"
+    ],
+    "next_command": "show running-config | section dot11 ssid LAB-GUEST",
+    "fix_steps": [
+      "Treat this as an active security incident before it is a config fault - guests currently have internal access",
+      "On the WLC/AP, open Wireless > WLANs and select LAB-GUEST",
+      "Change the Interface/VLAN mapping from VLAN 10 to VLAN 50",
+      "Confirm VLAN 50 is permitted on the AP-to-switch trunk and that Gi0/0.50 has a DHCP scope",
+      "Reconnect a guest client and verify it lands in 192.168.50.0/24",
+      "Confirm GUEST_FILTER starts taking matches, which proves guest traffic is now being evaluated"
+    ],
+    "secondary_findings": [
+      "Client isolation is Disabled on the guest SSID. Even after the VLAN is corrected, guests will be able to reach each other directly.",
+      "Any device that connected to LAB-GUEST while it was mapped to VLAN 10 held an internal address. The DHCP bindings for 192.168.10.0/24 should be audited rather than assumed clean."
+    ],
+    "requires_human_review": true
+  },
+  "NS-030": {
+    "root_cause": "Security mode mismatch between AP and client. AP1 runs WPA2-PSK with AES while LAPTOP1 is configured for WEP. The two authentication methods are not interoperable, so association fails and the client re-prompts for credentials that would never be accepted regardless of correctness.",
+    "osi_layer": 2,
+    "concept_tag": "Wireless",
+    "confidence": "high",
+    "evidence": [
+      "  Authentication : WPA2-PSK",
+      "  Authentication : WEP",
+      "%DOT11-4-AUTH_FAILED: Station 0060.4706.1A2B Authentication failed"
+    ],
+    "next_command": "show dot11 associations",
+    "fix_steps": [
+      "On LAPTOP1, open Config > Wireless0",
+      "Change Authentication from WEP to WPA2-PSK",
+      "Set encryption to AES to match the AP",
+      "Enter the passphrase Cisco12345",
+      "Confirm association: show dot11 associations on AP1"
+    ],
+    "secondary_findings": [
+      "Fix the client rather than the AP. Downgrading AP1 to WEP would also resolve the symptom but WEP is cryptographically broken and would weaken every other client on the SSID."
+    ],
+    "requires_human_review": true
+  },
+  "NS-031": {
+    "root_cause": "The WPA2-PSK key exchange is failing intermittently on the LAB-IOT SSID. Clients reach the association stage but the four-way handshake does not complete cleanly, so the DHCP exchange never gets through and the client self-assigns an APIPA address.",
+    "osi_layer": 2,
+    "concept_tag": "Wireless",
+    "confidence": "medium",
+    "evidence": [
+      "    Security               : WPA2-PSK",
+      "  0060.2f11.99cd 169.254.201.44  client   Assoc",
+      "   IP Address. . . . . . . . . . . . : 169.254.201.44"
+    ],
+    "next_command": "show dot11 associations",
+    "fix_steps": [
+      "On AP2, open Wireless > WLANs and select LAB-IOT",
+      "Re-enter the WPA2-PSK passphrase to rule out a corrupted key",
+      "Save and let the clients re-associate",
+      "Confirm clients obtain a routable address"
+    ],
+    "secondary_findings": [],
+    "requires_human_review": true
+  },
+  "NS-032": {
+    "root_cause": "R1 Gi0/1 is in a shutdown state. The interface reports administratively down, which is set by configuration rather than caused by cabling, so no amount of reseating will bring it up. R2's side shows up/down because it has carrier at its own port but no protocol peer.",
+    "osi_layer": 1,
+    "concept_tag": "Physical",
+    "confidence": "high",
+    "evidence": [
+      "GigabitEthernet0/1     10.0.0.1        YES manual administratively down down",
+      "GigabitEthernet0/1 is administratively down, line protocol is down (disabled)",
+      "GigabitEthernet0/1     10.0.0.2        YES manual up                    down"
+    ],
+    "next_command": "show running-config interface GigabitEthernet0/1",
+    "fix_steps": [
+      "On R1: configure terminal",
+      "interface GigabitEthernet0/1",
+      "no shutdown",
+      "Confirm both status and protocol read up: show ip interface brief",
+      "Verify the peer: ping 10.0.0.2"
+    ],
+    "secondary_findings": [
+      "R2 Gi0/1 shows up/down, which is consistent with a shut peer and needs no separate fix. Re-check it after R1 comes up rather than changing it now."
+    ],
+    "requires_human_review": true
+  },
+  "NS-033": {
+    "root_cause": "Duplex mismatch on the Gi0/2 uplink. SW1 is hard-set to full-duplex, which is the misconfigured end, while SW2 correctly negotiated half-duplex. In full-duplex mode SW1 transmits without carrier sense, colliding with SW2's traffic - hence the input errors on SW1 and the late collisions on SW2.",
+    "osi_layer": 1,
+    "concept_tag": "Physical",
+    "confidence": "high",
+    "evidence": [
+      "  Full-duplex, 100Mb/s, media type is 10/100/1000BaseTX",
+      "  Half-duplex, 100Mb/s, media type is 10/100/1000BaseTX",
+      "     2043 late collision, 118 deferred",
+      "     1247 input errors, 0 CRC, 0 frame, 0 overrun"
+    ],
+    "next_command": "show interfaces GigabitEthernet0/2 status",
+    "fix_steps": [
+      "On SW1: configure terminal",
+      "interface GigabitEthernet0/2",
+      "Set the port to half-duplex to match SW2: duplex half",
+      "Clear the counters and confirm errors stop rising: clear counters GigabitEthernet0/2",
+      "Re-test a large file transfer between buildings"
+    ],
+    "secondary_findings": [
+      "Ping succeeds throughout because small, infrequent packets rarely collide. This is why a duplex mismatch presents as a throughput problem rather than a reachability one."
+    ],
+    "requires_human_review": true
+  }
+}
