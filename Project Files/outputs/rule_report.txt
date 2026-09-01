@@ -1,0 +1,314 @@
+==============================================================================
+NS-001  VLAN  L2  High
+==============================================================================
+  symptom: PC1 has a correct static IP and default gateway but cannot ping its own gateway. The switch port shows up/up and the link light is green.
+  [HIGH    ] missing_vlan
+             A port is assigned to VLAN 20, but VLAN 20 is not in the VLAN database (defined: [1, 10, 1002, 1003]). The port sits in an inactive VLAN.
+             evidence :  switchport access vlan 20
+             verify   : configure terminal ; vlan 20
+
+==============================================================================
+NS-002  VLAN  L2  Medium
+==============================================================================
+  symptom: PC5 receives 192.168.30.24 from DHCP but the lab sheet says it should be in the 192.168.20.0/24 Sales subnet. It can reach other hosts, just the wrong ones.
+  no deterministic check fired -- outside the rule set
+
+==============================================================================
+NS-003  VLAN  L2  High
+==============================================================================
+  symptom: VLAN 40 hosts on SW1 can ping each other, but none of them can reach VLAN 40 hosts on SW2. VLAN 10 and 20 cross between the switches fine.
+  [HIGH    ] trunk_vlan_not_allowed
+             VLAN(s) [40] are active on this switch but not permitted on the trunk (allowed: [1, 10, 20, 30]). Their frames are pruned at the uplink.
+             evidence : Gi0/1       1,10,20,30
+             verify   : configure terminal ; interface <trunk> ; switchport trunk allowed vlan add 40
+
+==============================================================================
+NS-004  VLAN  L2  Medium
+==============================================================================
+  symptom: Connectivity between the two switches is intermittent and the console keeps printing a CDP warning every minute.
+  [MEDIUM  ] native_vlan_mismatch
+             Native VLAN mismatch on the trunk (SW1 Fa0/24=VLAN 1, SW2 Fa0/24=VLAN 99). Untagged traffic will leak between VLANs and STP will behave inconsistently.
+             evidence : %CDP-4-NATIVE_VLAN_MISMATCH: Native VLAN mismatch discovered on FastEthernet0/24 (1),
+             verify   : configure terminal ; interface <trunk> ; switchport trunk native vlan <id>
+
+==============================================================================
+NS-005  VLAN  L2  High
+==============================================================================
+  symptom: After recabling, only VLAN 1 devices can talk across the switch-to-switch link. Every other VLAN is isolated to its own switch.
+  [HIGH    ] uplink_not_trunking
+             No trunk interfaces are operational, yet the link is in static access mode. An inter-switch uplink left in access mode carries VLAN 1 only.
+             evidence : Operational Mode: static access
+             verify   : configure terminal ; interface <uplink> ; switchport mode trunk
+
+==============================================================================
+NS-006  Gateway  L3  Medium
+==============================================================================
+  symptom: PC2 can ping every other host in its own subnet and can ping the router, but cannot reach anything in another subnet.
+  [MEDIUM  ] gateway_not_a_router_interface
+             Configured gateway 192.168.10.254 does not match any router interface in this transcript. The router address on this segment is 192.168.10.1.
+             evidence :    Default Gateway . . . . . . . . . : 192.168.10.254
+             verify   : show ip interface brief
+
+==============================================================================
+NS-007  Gateway  L3  High
+==============================================================================
+  symptom: PC3 cannot ping its default gateway at all. Ping to hosts on the same subnet works normally.
+  [HIGH    ] gateway_not_in_subnet
+             Default gateway 192.168.11.1 is outside the host's own subnet (192.168.10.50/24). The host has no route to it.
+             evidence :    Default Gateway . . . . . . . . . : 192.168.11.1
+             verify   : ipconfig /all
+
+==============================================================================
+NS-008  Gateway  L3  Low
+==============================================================================
+  symptom: The switch management IP answers ping from a host in the management VLAN, but the switch cannot reach the syslog server on a different subnet.
+  [LOW     ] switch_no_default_gateway
+             Switch SVI Vlan99 (10.0.99.3) reaches its own subnet but no 'ip default-gateway' is configured, so the switch cannot originate traffic off-net. Management-plane only -- user traffic is unaffected.
+             evidence : SW3#ping 10.0.50.20
+             verify   : configure terminal ; ip default-gateway <router-ip>
+
+==============================================================================
+NS-009  Gateway  L3  High
+==============================================================================
+  symptom: VLAN 30 hosts cannot ping their gateway 192.168.30.1. VLAN 10 and VLAN 20 hosts have full connectivity.
+  [HIGH    ] subinterface_missing_for_vlan
+             VLAN(s) [30] are carried in the topology but have no router subinterface (present: [10, 20]). Those VLANs have no gateway.
+             evidence :  encapsulation dot1Q 10
+             verify   : configure terminal ; interface GigabitEthernet0/0.30 ; encapsulation dot1Q 30
+
+==============================================================================
+NS-010  DHCP  L3  Medium
+==============================================================================
+  symptom: Most PCs in the lab get an address, but the last few students to boot end up with 169.254.x.x and no connectivity.
+  [MEDIUM  ] apipa_detected
+             Host holds APIPA address 169.254.88.17, so its DHCP DISCOVER went unanswered. Look for an absent scope, an absent relay, or an exhausted pool before suspecting anything at Layer 2.
+             evidence :    IP Address. . . . . . . . . . . . : 169.254.88.17
+             verify   : show ip dhcp pool
+  [MEDIUM  ] dhcp_pool_exhausted
+             DHCP pool is fully allocated (244 of 244 leased). Further clients cannot obtain an address and will fall back to APIPA.
+             evidence :  Leased addresses               : 244
+             verify   : show ip dhcp pool
+
+==============================================================================
+NS-011  DHCP  L3  High
+==============================================================================
+  symptom: Every PC on the 192.168.10.0/24 segment receives an address in 192.168.99.x and has no connectivity to anything.
+  [HIGH    ] gateway_not_in_subnet
+             Default gateway 192.168.10.1 is outside the host's own subnet (192.168.99.2/24). The host has no route to it.
+             evidence : ip dhcp excluded-address 192.168.10.1 192.168.10.10
+             verify   : ipconfig /all
+  [HIGH    ] dhcp_pool_subnet_mismatch
+             DHCP pool network 192.168.99.0 255.255.255.0 does not match any interface subnet on this router (interfaces: ['192.168.10.1']). Clients receive addresses for a subnet that does not exist here.
+             evidence :  network 192.168.99.0 255.255.255.0
+             verify   : show running-config | section dhcp
+
+==============================================================================
+NS-012  DHCP  L3  High
+==============================================================================
+  symptom: All PCs get valid addresses in the right subnet and can ping each other, but none of them can reach another subnet.
+  [HIGH    ] dhcp_default_router_invalid
+             DHCP pool advertises default-router 192.168.10.254, which is not an address on this router (interfaces: ['192.168.10.1', '203.0.113.2']). Every client receives an unusable gateway.
+             evidence :  default-router 192.168.10.254
+             verify   : show running-config | section dhcp
+
+==============================================================================
+NS-013  DHCP  L3  High
+==============================================================================
+  symptom: VLAN 20 PCs never receive an address. VLAN 10 PCs, which share the subnet with the DHCP server, lease normally.
+  [MEDIUM  ] apipa_detected
+             Host holds APIPA address 169.254.12.9, so its DHCP DISCOVER went unanswered. Look for an absent scope, an absent relay, or an exhausted pool before suspecting anything at Layer 2.
+             evidence :    IP Address. . . . . . . . . . . . : 169.254.12.9
+             verify   : show ip dhcp pool
+  [HIGH    ] dhcp_relay_missing
+             Subinterface(s) ['GigabitEthernet0/0.20'] have no 'ip helper-address' while a sibling subinterface does, and a client is on APIPA. DHCP broadcasts from those VLANs are never relayed to the server.
+             evidence :  ip helper-address 192.168.10.5
+             verify   : configure terminal ; interface GigabitEthernet0/0.20 ; ip helper-address <server>
+
+==============================================================================
+NS-014  DNS  L7  Medium
+==============================================================================
+  symptom: Students can ping the web server by its IP address and can browse by IP, but any hostname fails to resolve.
+  [MEDIUM  ] dns_server_unreachable
+             Configured DNS server 192.168.10.53 does not respond to ping, so name resolution cannot work. Verify the address is correct before investigating the DNS service itself.
+             evidence : PC1> ping 192.168.10.53
+             verify   : ping 192.168.10.53
+
+==============================================================================
+NS-015  DNS  L7  High
+==============================================================================
+  symptom: Name resolution stopped working for the entire lab at once. IP connectivity is completely unaffected.
+  [HIGH    ] dns_service_disabled
+             The DNS service is disabled on the server. The host is reachable and the zone records are present, but nothing is listening to answer queries.
+             evidence : DNS Service : Off
+             verify   : On the server: Services > DNS > set Service to On
+
+==============================================================================
+NS-016  DNS  L7  Medium
+==============================================================================
+  symptom: Browsing to www.lab.local times out, but the name does resolve and the web server itself serves pages fine when reached by IP.
+  [MEDIUM  ] dns_record_points_nowhere
+             The A record for www.lab.local resolves to 192.168.20.99, which does not respond to ping. Resolution is working correctly -- the record itself is wrong.
+             evidence : www.lab.local     A     192.168.20.99
+             verify   : nslookup www.lab.local
+
+==============================================================================
+NS-017  Routing  L3  High
+==============================================================================
+  symptom: Hosts behind R1 cannot reach the 192.168.30.0/24 LAN behind R2. The WAN link between the routers is up and the routers can ping each other.
+  [HIGH    ] no_route_to_destination
+             No route covers 192.168.30.10 and no default route (0.0.0.0/0) is present, so the router drops the traffic itself.
+             evidence : PC1> ping 192.168.30.10
+             verify   : show ip route 192.168.30.10
+
+==============================================================================
+NS-018  Routing  L3  High
+==============================================================================
+  symptom: A static route to 10.10.30.0/24 exists in the routing table but traffic to that network still fails.
+  [HIGH    ] static_route_nexthop_unreachable
+             A static route points to next-hop 10.0.0.9, which does not respond to ping. IOS installs a static route without validating the next-hop, so the routing table looks correct while the traffic is black-holed.
+             evidence : S       10.10.30.0/24 [1/0] via 10.0.0.9
+             verify   : show cdp neighbors detail | include IP address
+
+==============================================================================
+NS-019  Routing  L3  High
+==============================================================================
+  symptom: All internal subnets reach each other, but nothing can reach the internet. Pings to 8.8.8.8 return 'Destination host unreachable' from the local router.
+  [HIGH    ] no_route_to_destination
+             No route covers 8.8.8.8 and no default route (0.0.0.0/0) is present, so the router drops the traffic itself.
+             evidence : PC1> ping 8.8.8.8
+             verify   : show ip route 8.8.8.8
+
+==============================================================================
+NS-020  Routing  L3  High
+==============================================================================
+  symptom: OSPF was configured on both routers but the neighbour relationship never forms and no OSPF routes appear.
+  [HIGH    ] ospf_area_mismatch
+             Network 10.0.0.0 0.0.0.3 is advertised into different OSPF areas (R1=area 0, R2=area 1). Area IDs must match on a shared segment for adjacency to form.
+             evidence :  network 10.0.0.0 0.0.0.3 area 0
+             verify   : show ip ospf interface | include Area
+
+==============================================================================
+NS-021  Routing  L3  Medium
+==============================================================================
+  symptom: Hosts 192.168.20.1 through .62 are reachable from R1, but anything from .70 upward times out. The route to that LAN is present.
+  [MEDIUM  ] route_mask_suspicious
+             Static route for 192.168.20.0 uses /26 but the network is actually /24. Only the first portion of the remote LAN is reachable.
+             evidence : S    192.168.20.0/26
+             verify   : show ip route 192.168.20.0
+
+==============================================================================
+NS-022  ACL  L4  High
+==============================================================================
+  symptom: An ACL was added to allow only HTTP to the server, but now the entire LAN has lost all outbound connectivity.
+  [HIGH    ] acl_applied_wrong_direction
+             ACL 101 is applied outbound, its permit entries have zero matches, and its deny is matching heavily. The direction is inverted -- it should almost certainly be applied inbound.
+             evidence :  ip access-group 101 out
+             verify   : configure terminal ; interface <lan> ; no ip access-group 101 out ; ip access-group 101 in
+
+==============================================================================
+NS-023  ACL  L4  High
+==============================================================================
+  symptom: Host 192.168.10.20 is supposed to be explicitly permitted to reach the server, but it is still blocked.
+  [HIGH    ] acl_shadowed_entry
+             In ACL 110, permit at sequence 20 has zero matches and is shadowed by the broader deny at sequence 10. Entries are evaluated top down, so the permit is unreachable.
+             evidence : 20 permit tcp host 192.168.10.20 host 192.168.20.10 eq www (0 matches)
+             verify   : configure terminal ; ip access-list extended 110 ; no 20 ; 9 permit tcp host 192.168.10.20 host 192.168.20.10 eq www
+
+==============================================================================
+NS-024  ACL  L4  High
+==============================================================================
+  symptom: After applying a new ACL, web browsing works but DHCP renewals and all name resolution stopped working.
+  [HIGH    ] acl_implicit_deny_gap
+             ACL 120 permits TCP only and has no explicit deny, so the implicit 'deny ip any any' drops UDP 53 (DNS), UDP 67/68 (DHCP) and ICMP.
+             evidence : 20 permit tcp any any eq 443 (1877 matches)
+             verify   : configure terminal ; ip access-list extended 120 ; permit udp any any eq 53 ; permit udp any any eq 67
+
+==============================================================================
+NS-025  ACL  L4  Critical
+==============================================================================
+  symptom: Guest VLAN clients can still open shares on the internal file server, even though a guest filter ACL was written and applied.
+  [CRITICAL] acl_zero_matches
+             Every entry in applied ACL GUEST_FILTER has zero matches, yet traffic is reaching its destination. The ACL is attached to an interface or direction the traffic never traverses -- the filter is not being enforced.
+             evidence : 10 deny ip 192.168.50.0 0.0.0.255 192.168.10.0 0.0.0.255 (0 matches)
+             verify   : show running-config | include ip access-group
+
+==============================================================================
+NS-026  NAT  L3  High
+==============================================================================
+  symptom: Internal hosts cannot reach the internet. NAT is configured on the router and the ISP link is up.
+  [HIGH    ] nat_roles_missing
+             A NAT translation rule exists but ip nat inside and ip nat outside is not configured on any interface, so the rule never engages.
+             evidence : Outside interfaces:
+Inside interfaces:
+             verify   : configure terminal ; interface <lan> ; ip nat inside ; interface <wan> ; ip nat outside
+
+==============================================================================
+NS-027  NAT  L3  High
+==============================================================================
+  symptom: Hosts in VLAN 10 can browse the internet, but hosts in VLAN 20 cannot reach anything outside.
+  [HIGH    ] nat_acl_coverage_gap
+             Interface with address 192.168.20.1 is marked 'ip nat inside', but ACL 1 does not permit its subnet. Traffic from that LAN leaves untranslated and is dropped upstream.
+             evidence : access-list 1 permit 192.168.10.0 0.0.0.255
+             verify   : configure terminal ; access-list 1 permit 192.168.20.0 0.0.0.255
+
+==============================================================================
+NS-028  NAT  L3  Medium
+==============================================================================
+  symptom: Only one internal host can use the internet at a time. When a second host starts browsing, the first one loses connectivity.
+  [MEDIUM  ] nat_missing_overload
+             NAT is configured against an interface without the 'overload' keyword, so the router performs one-to-one NAT instead of PAT. Only one inside host can translate at a time.
+             evidence : ip nat inside source list 1 interface GigabitEthernet0/1
+             verify   : configure terminal ; ip nat inside source list <acl> interface <wan> overload
+
+==============================================================================
+NS-029  Wireless  L3  Critical
+==============================================================================
+  symptom: A visitor connected to the Guest Wi-Fi was able to browse the internal file server and open staff shares.
+  [CRITICAL] wlan_vlan_mismatch
+             Wireless client holds 192.168.10.87, which is inside the protected destination subnet 192.168.10.0 rather than the untrusted source subnet 192.168.50.0. SSID LAB-GUEST is mapped to VLAN 10 -- the wrong VLAN. The filter is bypassed because the traffic never enters from the subnet it guards.
+             evidence :     Interface/VLAN mapping : VLAN 10
+             verify   : Remap the SSID to the guest VLAN, then re-test
+
+==============================================================================
+NS-030  Wireless  L2  Medium
+==============================================================================
+  symptom: A laptop will not associate with the lab SSID. It repeatedly prompts for the network password even though the passphrase is being typed correctly.
+  [MEDIUM  ] wireless_security_mismatch
+             Wireless authentication methods do not match across the link (WPA2-PSK, WEP). Association cannot complete until both ends agree.
+             evidence : %DOT11-4-AUTH_FAILED: Station 0060.4706.1A2B Authentication failed
+             verify   : Set the client to match the AP: WPA2-PSK with AES
+
+==============================================================================
+NS-031  Wireless  L3  High
+==============================================================================
+  symptom: Wireless clients associate with the AP successfully, signal is strong, but every client ends up with a 169.254.x.x address and no connectivity.
+  [HIGH    ] subinterface_missing_for_vlan
+             VLAN(s) [60] are carried in the topology but have no router subinterface (present: [10, 20, 50]). Those VLANs have no gateway.
+             evidence : encapsulation dot1Q
+             verify   : configure terminal ; interface GigabitEthernet0/0.60 ; encapsulation dot1Q 60
+  [MEDIUM  ] apipa_detected
+             Host holds APIPA address 169.254.201.44, so its DHCP DISCOVER went unanswered. Look for an absent scope, an absent relay, or an exhausted pool before suspecting anything at Layer 2.
+             evidence :    IP Address. . . . . . . . . . . . : 169.254.201.44
+             verify   : show ip dhcp pool
+
+==============================================================================
+NS-032  Physical  L1  High
+==============================================================================
+  symptom: The link between R1 and R2 shows no activity. Cabling was checked and reseated but the interface stays down.
+  [HIGH    ] interface_admin_down
+             GigabitEthernet0/1 is administratively down -- the interface was never brought up with 'no shutdown'.
+             evidence : GigabitEthernet0/1     10.0.0.1        YES manual administratively down down
+             verify   : configure terminal ; interface GigabitEthernet0/1 ; no shutdown
+  [MEDIUM  ] interface_protocol_down
+             GigabitEthernet0/1 is up/down: the physical layer is fine but the line protocol is not. Suspect the far end of this link.
+             evidence : GigabitEthernet0/1     10.0.0.1        YES manual administratively down down
+             verify   : show interfaces GigabitEthernet0/1
+
+==============================================================================
+NS-033  Physical  L1  Medium
+==============================================================================
+  symptom: File transfers between two buildings are extremely slow and occasionally drop, but ping succeeds and the link shows up/up.
+  [MEDIUM  ] duplex_mismatch
+             Duplex mismatch across the link (SW1=Full-duplex, SW2=Half-duplex).
+             evidence :      0 late collision, 0 deferred
+             verify   : configure terminal ; interface <uplink> ; duplex full
