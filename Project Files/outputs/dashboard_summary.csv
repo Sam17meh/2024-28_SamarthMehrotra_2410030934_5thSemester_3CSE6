@@ -1,0 +1,50 @@
+case_id,concept_tag,osi_layer,severity,checker_fired,finding_count,check_ids,decision,failure_mode,checker_agreement,expected_fault
+NS-001,VLAN,2,High,True,1,missing_vlan,Accepted,,agree,"VLAN 20 was never created in the switch VLAN database. Fa0/3 is assigned to an inactive VLAN, so frames are dropped even though the port is up."
+NS-002,VLAN,2,Medium,False,0,,Rejected,surface-signal bias,checker_silent,"Fa0/5 is assigned to VLAN 30 (Guest) instead of VLAN 20 (Sales), so the host leases from the Guest DHCP scope."
+NS-003,VLAN,2,High,True,1,trunk_vlan_not_allowed,Accepted,,agree,"VLAN 40 is missing from the trunk's allowed VLAN list on Gi0/1, so its frames are pruned at the inter-switch link."
+NS-004,VLAN,2,Medium,True,1,native_vlan_mismatch,Accepted,,agree,"Native VLAN mismatch across the trunk: SW1 uses VLAN 1, SW2 uses VLAN 99. Untagged traffic leaks between VLANs and STP behaves inconsistently."
+NS-005,VLAN,2,High,True,1,uplink_not_trunking,Accepted,,agree,"The inter-switch link was left in static access mode in VLAN 1 instead of being configured as an 802.1q trunk, so only VLAN 1 crosses it."
+NS-006,Gateway,3,Medium,True,1,gateway_not_a_router_interface,Accepted,,agree,"PC2's default gateway is set to 192.168.10.254, which does not exist. The real gateway is 192.168.10.1."
+NS-007,Gateway,3,High,True,1,gateway_not_in_subnet,Accepted,,agree,"The configured default gateway 192.168.11.1 is outside PC3's own 192.168.10.0/24 subnet, so the host has no route to reach it."
+NS-008,Gateway,3,Low,True,1,switch_no_default_gateway,Edited,platform-inappropriate command,agree,"No 'ip default-gateway' is configured on the Layer 2 switch, so it can reach its local subnet but cannot originate traffic off-net."
+NS-009,Gateway,3,High,True,1,subinterface_missing_for_vlan,Accepted,,agree,"The router-on-a-stick configuration is missing the Gi0/0.30 subinterface for VLAN 30, so that VLAN has no Layer 3 gateway."
+NS-010,DHCP,3,Medium,True,2,"apipa_detected, dhcp_pool_exhausted",Edited,unsafe fix proposed,agree,"The DHCP pool is fully exhausted (244 of 244 leased), so late clients fall back to APIPA addressing."
+NS-011,DHCP,3,High,True,2,"gateway_not_in_subnet, dhcp_pool_subnet_mismatch",Edited,missed second fault,agree,"The DHCP pool network statement is 192.168.99.0/24 but the serving interface is in 192.168.10.0/24, so clients get addresses from the wrong subnet."
+NS-012,DHCP,3,High,True,1,dhcp_default_router_invalid,Rejected,surface-signal bias,disagree,"The DHCP pool hands out default-router 192.168.10.254, which is not a real gateway. The router's LAN address is 192.168.10.1."
+NS-013,DHCP,3,High,True,2,"apipa_detected, dhcp_relay_missing",Accepted,,agree,"Gi0/0.20 has no 'ip helper-address', so VLAN 20 DHCP broadcasts are never relayed to the server at 192.168.10.5."
+NS-014,DNS,7,Medium,True,1,dns_server_unreachable,Edited,evidence not verbatim,agree,"The host points at 192.168.10.53 as its DNS server, but the actual DNS service runs on 192.168.10.5. No device answers at .53."
+NS-015,DNS,7,High,True,1,dns_service_disabled,Accepted,,agree,"The DNS service is toggled Off on the server. The host and its records are fine, the daemon simply is not answering."
+NS-016,DNS,7,Medium,True,1,dns_record_points_nowhere,Accepted,,agree,"The A record for www.lab.local points to 192.168.20.99, which is not assigned to any host. The web server is 192.168.20.10."
+NS-017,Routing,3,High,True,1,no_route_to_destination,Accepted,,agree,"R1 has no route to 192.168.30.0/24 and no default route, so it drops the traffic and returns an ICMP unreachable."
+NS-018,Routing,3,High,True,1,static_route_nexthop_unreachable,Accepted,,agree,"The static route points to next-hop 10.0.0.9, which does not exist. The actual neighbour on the /30 link is 10.0.0.2."
+NS-019,Routing,3,High,True,1,no_route_to_destination,Accepted,,agree,"No default route (0.0.0.0/0) toward the ISP is configured on R1, so packets for outside destinations have no matching route."
+NS-020,Routing,3,High,True,1,ospf_area_mismatch,Edited,fix violates design intent,agree,The shared link is in OSPF area 0 on R1 but area 1 on R2. Area IDs must match on a common segment for adjacency to form.
+NS-021,Routing,3,Medium,True,1,route_mask_suspicious,Rejected,plausible-but-wrong mechanism,disagree,"The static route was written with mask 255.255.255.192 (/26) instead of /24, so only the first 62 hosts of the LAN are covered."
+NS-022,ACL,4,High,True,1,acl_applied_wrong_direction,Accepted,,agree,"ACL 101 is applied outbound on Gi0/0, so it filters traffic heading toward the LAN rather than traffic sourced from it. It should be applied inbound."
+NS-023,ACL,4,High,True,1,acl_shadowed_entry,Accepted,,agree,"ACL entry ordering is wrong. The broad deny at sequence 10 matches first, so the specific permit at sequence 20 is never evaluated."
+NS-024,ACL,4,High,True,1,acl_implicit_deny_gap,Edited,missed second fault,agree,ACL 120 only permits TCP 80 and 443. The implicit 'deny ip any any' at the end drops UDP 53 (DNS) and UDP 67/68 (DHCP).
+NS-025,ACL,4,Critical,True,1,acl_zero_matches,Rejected,incorrect protocol reasoning,disagree,"GUEST_FILTER is applied inbound on Gi0/0.10 (the internal VLAN) instead of Gi0/0.50 (the guest VLAN), so guest-sourced traffic is never evaluated. Zero matches confirm it."
+NS-026,NAT,3,High,True,1,nat_roles_missing,Accepted,,agree,"Neither interface is marked with 'ip nat inside' or 'ip nat outside', so the NAT rule never engages. Note the empty interface lists in show ip nat statistics."
+NS-027,NAT,3,High,True,1,nat_acl_coverage_gap,Accepted,,agree,"The NAT source ACL only permits 192.168.10.0/24. VLAN 20 traffic is not matched, so it leaves untranslated and is dropped upstream."
+NS-028,NAT,3,Medium,True,1,nat_missing_overload,Accepted,,agree,"The 'overload' keyword is missing from the NAT statement, so the router does one-to-one NAT instead of PAT. With a single public IP only one host can translate at a time."
+NS-029,Wireless,3,Critical,True,1,wlan_vlan_mismatch,Accepted,,agree,"The guest SSID is mapped to internal VLAN 10 instead of guest VLAN 50. Guests land directly on the internal subnet, bypassing GUEST_FILTER entirely."
+NS-030,Wireless,2,Medium,True,1,wireless_security_mismatch,Accepted,,agree,Security mode mismatch: the AP runs WPA2-PSK with AES while the client is set to WEP. The authentication method must match on both sides.
+NS-031,Wireless,3,High,True,2,"subinterface_missing_for_vlan, apipa_detected",Rejected,plausible-but-wrong mechanism,disagree,"VLAN 60 has no Layer 3 gateway subinterface and no DHCP pool. Association succeeds at Layer 2, but there is nothing to serve addresses, so clients fall back to APIPA."
+NS-032,Physical,1,High,True,2,"interface_admin_down, interface_protocol_down",Accepted,,agree,R1 Gi0/1 was left in a shutdown state. 'administratively down' means the interface was never brought up with 'no shutdown'.
+NS-033,Physical,1,Medium,True,1,duplex_mismatch,Edited,wrong device blamed,agree,Duplex mismatch on the uplink: SW1 Gi0/2 is full-duplex while SW2 Gi0/2 is half-duplex. The late collision and CRC counters confirm it.
+
+KPI,value
+total_cases,33
+concept_tags,9
+osi_layers_covered,5
+deterministic_checks,34
+cases_with_findings,32
+checker_catch_rate,97.0%
+cases_reviewed,33
+accepted,21
+edited,7
+rejected,5
+human_corrections,12
+ai_agreement_rate,63.6%
+evidence_integrity_rate,97.0%
+diagnoses_with_unverifiable_evidence,1
